@@ -22,7 +22,7 @@ class EHNetModel(pl.LightningModule):
     Input size: (batch_size, 1, frequency_bins, time)
     """
 
-    def __init__(self, batch_size, spectograms_size, n_kernels, kernel_size, stride, padding,
+    def __init__(self, batch_size, n_frequency_bins, n_kernels, kernel_size, stride, padding,
                  n_lstm_layers, n_lstm_units, lstm_dropout):
         """
         Pass in parsed HyperOptArgumentParser to the model
@@ -32,7 +32,7 @@ class EHNetModel(pl.LightningModule):
         super(EHNetModel, self).__init__()
 
         self.batch_size = batch_size
-        self.spectograms_size = spectograms_size
+        self.n_frequency_bins = n_frequency_bins
         self.n_kernels = n_kernels
         self.kernel_size = kernel_size
         self.stride = stride
@@ -55,10 +55,10 @@ class EHNetModel(pl.LightningModule):
         self.conv = nn.Conv2d(in_channels=1, out_channels=self.n_kernels,
                               kernel_size=self.kernel_size, stride=self.stride,
                               padding=self.padding)
-        n_features = self.n_kernels * (((self.spectograms_size[0] - self.kernel_size[0] + 2 * self.padding[0]) / self.stride[0]) + 1)
+        n_features = self.n_kernels * (((self.n_frequency_bins - self.kernel_size[0] + 2 * self.padding[0]) / self.stride[0]) + 1)
         self.lstm = nn.LSTM(input_size=n_features, hidden_size=self.n_lstm_units, num_layers=self.n_lstm_layers,
                             batch_first=True, dropout=self.lstm_dropout, bidirectional=True)
-        self.dense = nn.Linear(in_features=2 * self.n_lstm_units, out_features=self.spectograms_size[0])
+        self.dense = nn.Linear(in_features=2 * self.n_lstm_units, out_features=self.n_frequency_bins)
 
     # ---------------------
     # TRAINING
