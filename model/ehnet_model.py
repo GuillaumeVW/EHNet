@@ -7,11 +7,12 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.transforms as transforms
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from torchvision.datasets import MNIST
+from torchaudio.transforms import Spectrogram
+from dataloader.wav_dataset import WAVDataset
+
 
 import pytorch_lightning as pl
 
@@ -19,11 +20,11 @@ import pytorch_lightning as pl
 class EHNetModel(pl.LightningModule):
     """
     Sample model to show how to define a template
-    Input size: (batch_size, 1, frequency_bins, time)
+    Input size: (batch_size, frequency_bins, time)
     """
 
-    def __init__(self, batch_size, n_frequency_bins, n_kernels, kernel_size, stride, padding,
-                 n_lstm_layers, n_lstm_units, lstm_dropout):
+    def __init__(self, train_dir, val_dir, batch_size, n_frequency_bins=256, n_kernels=256, kernel_size=(32, 11),
+                 n_lstm_layers=2, n_lstm_units=1024, lstm_dropout=0):
         """
         Pass in parsed HyperOptArgumentParser to the model
         :param hparams:
@@ -31,12 +32,14 @@ class EHNetModel(pl.LightningModule):
         # init superclass
         super(EHNetModel, self).__init__()
 
+        self.train_dir = train_dir
+        self.val_dir = val_dir
         self.batch_size = batch_size
         self.n_frequency_bins = n_frequency_bins
         self.n_kernels = n_kernels
         self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
+        self.stride = (kernel_size[0] // 2, 1)
+        self.padding = (kernel_size[1] // 2, kernel_size[1] // 2)
         self.n_lstm_layers = n_lstm_layers
         self.n_lstm_units = n_lstm_units
         self.lstm_dropout = lstm_dropout
@@ -55,7 +58,7 @@ class EHNetModel(pl.LightningModule):
         self.conv = nn.Conv2d(in_channels=1, out_channels=self.n_kernels,
                               kernel_size=self.kernel_size, stride=self.stride,
                               padding=self.padding)
-        n_features = self.n_kernels * (((self.n_frequency_bins - self.kernel_size[0] + 2 * self.padding[0]) / self.stride[0]) + 1)
+        n_features = int(self.n_kernels * (((self.n_frequency_bins - self.kernel_size[0] + 2 * self.padding[0]) // self.stride[0]) + 1))
         self.lstm = nn.LSTM(input_size=n_features, hidden_size=self.n_lstm_units, num_layers=self.n_lstm_layers,
                             batch_first=True, dropout=self.lstm_dropout, bidirectional=True)
         self.dense = nn.Linear(in_features=2 * self.n_lstm_units, out_features=self.n_frequency_bins)
@@ -69,12 +72,12 @@ class EHNetModel(pl.LightningModule):
         :param x:
         :return:
         """
-        x = x[:, None, :, :]  # (batch_size, 1, frequency_bins, time)
-        x = nn.ReLU(self.conv(x))  # (batch_size, n_kernels, n_features, time)
+        x = torch.unsqueeze(x, 1)  # (batch_size, 1, frequency_bins, time)
+        x = nn.ReLU()(self.conv(x))  # (batch_size, n_kernels, n_features, time)
         x = x.permute(0, 3, 1, 2)  # (batch_size, time, n_kernels, n_features)
-        x = x.view(x.shape[0], x.shape[1], -1)  # (batch_size, time, n_kernels * n_features)
-        x = self.lstm(x)  # (batch_size, time, 2 * n_lstm_units)
-        x = nn.ReLU(self.dense(x))  # (batch_size, time, frequency_bins)
+        x = nn.Flatten(start_dim=2)(x)  # (batch_size, time, n_kernels * n_features)
+        x, _ = self.lstm(x)  # (batch_size, time, 2 * n_lstm_units)
+        x = nn.ReLU()(self.dense(x))  # (batch_size, time, frequency_bins)
         x = x.permute(0, 2, 1)  # (batch_size, frequency_bins, time)
 
         return x
@@ -172,14 +175,17 @@ class EHNetModel(pl.LightningModule):
 
     def __dataloader(self, train):
         # init data generators
-        transform = transforms.Compose([transforms.ToTensor(),
-                                        transforms.Normalize((0.5,), (1.0,))])
-        dataset = MNIST(root=self.hparams.data_root, train=train,
-                        transform=transform, download=True)
+        
+        transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2)
+
+        if train:
+            dataset = WAVDataset(self.train_dir, transform=transform)
+        else:
+            dataset = WAVDataset(self.val_dir, transform=transform)
 
         # when using multi-node (ddp) we need to add the  datasampler
         train_sampler = None
-        batch_size = self.hparams.batch_size
+        batch_size = self.batch_size
 
         if self.use_ddp:
             train_sampler = DistributedSampler(dataset)
@@ -203,9 +209,4 @@ class EHNetModel(pl.LightningModule):
     @pl.data_loader
     def val_dataloader(self):
         log.info('Validation data loader called.')
-        return self.__dataloader(train=False)
-
-    @pl.data_loader
-    def test_dataloader(self):
-        log.info('Test data loader called.')
         return self.__dataloader(train=False)
