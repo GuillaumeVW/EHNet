@@ -23,8 +23,8 @@ class EHNetModel(pl.LightningModule):
     Input size: (batch_size, frequency_bins, time)
     """
 
-    def __init__(self, train_dir, val_dir, batch_size, n_frequency_bins=256, n_kernels=256, kernel_size=(32, 11),
-                 n_lstm_layers=2, n_lstm_units=1024, lstm_dropout=0):
+    def __init__(self, train_dir, val_dir, hparams={'batch_size': 4, 'n_frequency_bins': 256, 'n_kernels': 256, 'kernel_size': (32, 11),
+                 'n_lstm_layers': 2, 'n_lstm_units': 1024, 'lstm_dropout': 0}):
         """
         Pass in parsed HyperOptArgumentParser to the model
         :param hparams:
@@ -34,15 +34,15 @@ class EHNetModel(pl.LightningModule):
 
         self.train_dir = train_dir
         self.val_dir = val_dir
-        self.batch_size = batch_size
-        self.n_frequency_bins = n_frequency_bins
-        self.n_kernels = n_kernels
-        self.kernel_size = kernel_size
-        self.stride = (kernel_size[0] // 2, 1)
-        self.padding = (kernel_size[1] // 2, kernel_size[1] // 2)
-        self.n_lstm_layers = n_lstm_layers
-        self.n_lstm_units = n_lstm_units
-        self.lstm_dropout = lstm_dropout
+        self.batch_size = hparams['batch_size']
+        self.n_frequency_bins = hparams['n_frequency_bins']
+        self.n_kernels = hparams['n_kernels']
+        self.kernel_size = hparams['kernel_size']
+        self.stride = (self.kernel_size[0] // 2, 1)
+        self.padding = (self.kernel_size[1] // 2, self.kernel_size[1] // 2)
+        self.n_lstm_layers = hparams['n_lstm_layers']
+        self.n_lstm_units = hparams['n_lstm_units']
+        self.lstm_dropout = hparams['lstm_dropout']
 
         # build model
         self.__build_model()
