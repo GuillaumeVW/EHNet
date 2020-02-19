@@ -15,6 +15,8 @@ soundfile = "*"
 torch = "*"
 torchvision = "*"
 torchaudio = "*"
+pypesq = "*"
+pystoi = "*"
 
 [requires]
 python_version = "3.6"
