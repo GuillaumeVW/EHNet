@@ -11,6 +11,7 @@ from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torchaudio.transforms import Spectrogram
+from torchaudio.functional import angle, istft
 from dataloader.wav_dataset import WAVDataset
 
 
@@ -120,11 +121,29 @@ class EHNetModel(pl.LightningModule):
         :param batch:
         :return:
         """
-        x, y = batch
+        n_fft = (self.n_frequency_bins - 1) * 2
 
-        y_hat = self.forward(x)
+        x_waveform, y_waveform = batch
+        
+        window = torch.hann_window(n_fft)
+        if x_waveform.is_cuda:
+            window = window.cuda()
 
-        loss_val = self.loss(y, y_hat)
+        x_stft = torch.stft(x_waveform, n_fft=n_fft, hop_length=n_fft // 2, win_length=n_fft, window=window)
+        y_stft = torch.stft(y_waveform, n_fft=n_fft, hop_length=n_fft // 2, win_length=n_fft, window=window)
+
+        x_spectrogram, y_spectrogram = (x_stft.pow(2).sum(-1), y_stft.pow(2).sum(-1))
+
+        y_spectrogram_hat = self.forward(x_spectrogram)
+
+        y_stft_hat = torch.stack([y_spectrogram_hat.sqrt() * torch.cos(angle(x_stft)),
+                                  y_spectrogram_hat.sqrt() * torch.sin(angle(x_stft))], dim=-1)
+
+        y_waveform_hat = istft(y_stft_hat, n_fft=n_fft, hop_length=n_fft // 2, win_length=n_fft, window=window, length=y_waveform.shape[-1])
+
+        loss_val = self.loss(y_spectrogram, y_spectrogram_hat)
+
+        timedomain_MSE_val = self.loss(y_waveform, y_waveform_hat)
 
         # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
         if self.trainer.use_dp or self.trainer.use_ddp2:
@@ -132,6 +151,7 @@ class EHNetModel(pl.LightningModule):
 
         output = OrderedDict({
             'val_loss': loss_val,
+            'val_timedomain_MSE': timedomain_MSE_val
         })
 
         # can also return just a scalar instead of a dict (return loss_val)
@@ -148,17 +168,22 @@ class EHNetModel(pl.LightningModule):
         # return torch.stack(outputs).mean()
 
         val_loss_mean = 0
+        val_timedomain_MSE_mean = 0
         for output in outputs:
             val_loss = output['val_loss']
+            val_timedomain_MSE = output['val_timedomain_MSE']
 
             # reduce manually when using dp
             if self.trainer.use_dp or self.trainer.use_ddp2:
                 val_loss = torch.mean(val_loss)
+                val_timedomain_MSE = torch.mean(val_timedomain_MSE)
             val_loss_mean += val_loss
+            val_timedomain_MSE_mean += val_timedomain_MSE
 
         val_loss_mean /= len(outputs)
-        tqdm_dict = {'val_loss': val_loss_mean}
-        result = {'progress_bar': tqdm_dict, 'log': tqdm_dict, 'val_loss': val_loss_mean}
+        val_timedomain_MSE_mean /= len(outputs)
+        tqdm_dict = {'val_loss': val_loss_mean, 'val_timedomain_MSE': val_timedomain_MSE_mean}
+        result = {'progress_bar': tqdm_dict, 'log': tqdm_dict, 'val_loss': val_loss_mean, 'val_timedomain_MSE': val_timedomain_MSE_mean}
         return result
 
     # ---------------------
@@ -175,13 +200,13 @@ class EHNetModel(pl.LightningModule):
 
     def __dataloader(self, train):
         # init data generators
-        
+
         transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2)
 
         if train:
             dataset = WAVDataset(self.train_dir, transform=transform)
         else:
-            dataset = WAVDataset(self.val_dir, transform=transform)
+            dataset = WAVDataset(self.val_dir, transform=None)
 
         # when using multi-node (ddp) we need to add the  datasampler
         train_sampler = None
