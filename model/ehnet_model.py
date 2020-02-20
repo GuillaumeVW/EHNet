@@ -3,6 +3,8 @@ Example template for defining a system
 """
 import logging as log
 from collections import OrderedDict
+from pathlib import Path
+from argparse import Namespace
 
 import torch
 import torch.nn as nn
@@ -25,8 +27,8 @@ class EHNetModel(pl.LightningModule):
     Input size: (batch_size, frequency_bins, time)
     """
 
-    def __init__(self, train_dir, val_dir, test_dir, hparams={'batch_size': 4, 'n_frequency_bins': 256, 'n_kernels': 256, 'kernel_size': (32, 11),
-                 'n_lstm_layers': 2, 'n_lstm_units': 1024, 'lstm_dropout': 0}):
+    def __init__(self, hparams=Namespace(**{'train_dir': None, 'val_dir': None, 'test_dir': None, 'batch_size': 4, 'n_frequency_bins': 256, 'n_kernels': 256,
+                                            'kernel_size_f': 32, 'kernel_size_t': 11, 'n_lstm_layers': 2, 'n_lstm_units': 1024, 'lstm_dropout': 0})):
         """
         Pass in parsed HyperOptArgumentParser to the model
         :param hparams:
@@ -34,19 +36,19 @@ class EHNetModel(pl.LightningModule):
         # init superclass
         super(EHNetModel, self).__init__()
 
-        self.train_dir = train_dir
-        self.val_dir = val_dir
-        self.test_dir = test_dir
         self.hparams = hparams
-        self.batch_size = self.hparams['batch_size']
-        self.n_frequency_bins = self.hparams['n_frequency_bins']
-        self.n_kernels = self.hparams['n_kernels']
-        self.kernel_size = self.hparams['kernel_size'].numpy()
+        self.train_dir = Path(self.hparams.train_dir)
+        self.val_dir = Path(self.hparams.val_dir)
+        self.test_dir = Path(self.hparams.test_dir)
+        self.batch_size = self.hparams.batch_size
+        self.n_frequency_bins = self.hparams.n_frequency_bins
+        self.n_kernels = self.hparams.n_kernels
+        self.kernel_size = (self.hparams.kernel_size_f, self.hparams.kernel_size_t)
         self.stride = (self.kernel_size[0] // 2, 1)
         self.padding = (self.kernel_size[1] // 2, self.kernel_size[1] // 2)
-        self.n_lstm_layers = self.hparams['n_lstm_layers']
-        self.n_lstm_units = self.hparams['n_lstm_units']
-        self.lstm_dropout = self.hparams['lstm_dropout']
+        self.n_lstm_layers = self.hparams.n_lstm_layers
+        self.n_lstm_units = self.hparams.n_lstm_units
+        self.lstm_dropout = self.hparams.lstm_dropout
 
         # build model
         self.__build_model()
@@ -229,7 +231,6 @@ class EHNetModel(pl.LightningModule):
 
         orig_STOI /= self.batch_size
         denoised_STOI /= self.batch_size
-
 
         # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
         if self.trainer.use_dp or self.trainer.use_ddp2:
