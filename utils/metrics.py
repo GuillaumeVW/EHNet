@@ -9,7 +9,8 @@ def power(x):
 
 
 def SNR(noisy_waveform, clean_waveform):
-    return 10 * math.log10(power(clean_waveform) / power(noisy_waveform))
+    noise_waveform = noisy_waveform - clean_waveform
+    return 10 * math.log10(power(clean_waveform) / power(noise_waveform))
 
 
 def PESQ(noisy_waveform, clean_waveform):
