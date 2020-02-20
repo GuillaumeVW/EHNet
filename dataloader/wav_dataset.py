@@ -31,7 +31,7 @@ class WAVDataset(Dataset):
 
     def __getitem__(self, idx):
         noisy_path = self.noisy_WAVs[idx]
-        clean_path = self.clean_dir.joinpath(noisy_path.name.split('_')[0] + '.wav')  # get the filename of the clean WAV from the filename of the noisy WAV
+        clean_path = self.clean_dir.joinpath(noisy_path.name.split('+')[0] + '.wav')  # get the filename of the clean WAV from the filename of the noisy WAV
         clean_waveform, _ = torchaudio.load(clean_path, normalization=2**15)
         noisy_waveform, _ = torchaudio.load(noisy_path, normalization=2**15)
 
