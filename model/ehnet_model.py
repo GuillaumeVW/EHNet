@@ -312,7 +312,7 @@ class EHNetModel(pl.LightningModule):
         return whatever optimizers we want here
         :return: list of optimizers
         """
-        optimizer = optim.Adadelta(self.parameters(), lr=1.0)
+        optimizer = optim.Adadelta(self.parameters(), lr=1.0, weight_decay=0.0005)
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=60, gamma=0.1)
         return [optimizer], [scheduler]
 
