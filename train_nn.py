@@ -22,7 +22,8 @@ model = EHNetModel(hparams=Namespace(**{'train_dir': train_dir,
                                         'lstm_dropout': 0.3}))
 
 logger = TensorBoardLogger(save_dir=os.getcwd(), name="lightning_logs")
-checkpoint_path = os.path.join(logger.save_dir, logger.name, f"version_{logger.version}")
+checkpoint_path = os.path.join(logger.save_dir, logger.name, f"version_{logger.version}", "checkpoints")
+os.makedirs(checkpoint_path)
 checkpoint_callback = ModelCheckpoint(filepath=checkpoint_path, verbose=1, save_top_k=5, mode='min')
 
 trainer = Trainer(gpus=1, min_epochs=200, logger=logger, checkpoint_callback=checkpoint_callback)
