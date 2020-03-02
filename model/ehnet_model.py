@@ -13,9 +13,7 @@ from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torchaudio.transforms import Spectrogram
-from torchaudio.functional import angle, istft
 from dataloader.wav_dataset import WAVDataset
-from utils.metrics import SNR, PESQ, STOI
 
 
 import pytorch_lightning as pl
@@ -27,7 +25,7 @@ class EHNetModel(pl.LightningModule):
     Input size: (batch_size, frequency_bins, time)
     """
 
-    def __init__(self, hparams=Namespace(**{'train_dir': None, 'val_dir': None, 'test_dir': None, 'batch_size': 4, 'n_frequency_bins': 256, 'n_kernels': 256,
+    def __init__(self, hparams=Namespace(**{'train_dir': None, 'val_dir': None, 'batch_size': 4, 'n_frequency_bins': 256, 'n_kernels': 256,
                                             'kernel_size_f': 32, 'kernel_size_t': 11, 'n_lstm_layers': 2, 'n_lstm_units': 1024, 'lstm_dropout': 0})):
         """
         Pass in parsed HyperOptArgumentParser to the model
@@ -39,7 +37,6 @@ class EHNetModel(pl.LightningModule):
         self.hparams = hparams
         self.train_dir = Path(self.hparams.train_dir)
         self.val_dir = Path(self.hparams.val_dir)
-        self.test_dir = Path(self.hparams.test_dir)
         self.batch_size = self.hparams.batch_size
         self.n_frequency_bins = self.hparams.n_frequency_bins
         self.n_kernels = self.hparams.n_kernels
@@ -167,143 +164,6 @@ class EHNetModel(pl.LightningModule):
         result = {'progress_bar': tqdm_dict, 'log': tqdm_dict, 'val_loss': val_loss_mean}
         return result
 
-    def test_step(self, batch, batch_idx):
-        """
-        Lightning calls this inside the testing loop
-        :param batch:
-        :return:
-        """
-        n_fft = (self.n_frequency_bins - 1) * 2
-
-        x_waveform, y_waveform = batch
-        
-        window = torch.hann_window(n_fft)
-        if x_waveform.is_cuda:
-            window = window.cuda()
-
-        x_stft = torch.stft(x_waveform, n_fft=n_fft, hop_length=n_fft // 2, win_length=n_fft, window=window)
-        y_stft = torch.stft(y_waveform, n_fft=n_fft, hop_length=n_fft // 2, win_length=n_fft, window=window)
-
-        x_spectrogram, y_spectrogram = (x_stft.pow(2).sum(-1), y_stft.pow(2).sum(-1))
-
-        y_spectrogram_hat = self.forward(x_spectrogram)
-
-        y_stft_hat = torch.stack([y_spectrogram_hat.sqrt() * torch.cos(angle(x_stft)),
-                                  y_spectrogram_hat.sqrt() * torch.sin(angle(x_stft))], dim=-1)
-
-        y_waveform_hat = istft(y_stft_hat, n_fft=n_fft, hop_length=n_fft // 2, win_length=n_fft, window=window, length=y_waveform.shape[-1])
-
-        loss_test = self.loss(y_spectrogram, y_spectrogram_hat)
-
-        # calculate average SNR, PESQ and STOI for the batch
-        noisy_waveforms = torch.unbind(x_waveform.cpu())
-        clean_waveforms = torch.unbind(y_waveform.cpu())
-        denoised_waveforms = torch.unbind(y_waveform_hat.cpu())
-
-        orig_SNR = 0
-        denoised_SNR = 0
-
-        orig_PESQ = 0
-        denoised_PESQ = 0
-
-        orig_STOI = 0
-        denoised_STOI = 0
-        
-        for noisy_waveform, clean_waveform, denoised_waveform in zip(noisy_waveforms, clean_waveforms, denoised_waveforms):
-            noisy_waveform = noisy_waveform.numpy()
-            clean_waveform = clean_waveform.numpy()
-            denoised_waveform = denoised_waveform.numpy()
-
-            orig_SNR += SNR(noisy_waveform, clean_waveform)
-            denoised_SNR += SNR(denoised_waveform, clean_waveform)
-
-            orig_PESQ += PESQ(noisy_waveform, clean_waveform)
-            denoised_PESQ += PESQ(denoised_waveform, clean_waveform)
-
-            orig_STOI += STOI(noisy_waveform, clean_waveform)
-            denoised_STOI += STOI(denoised_waveform, clean_waveform)
-
-        orig_SNR /= self.batch_size
-        denoised_SNR /= self.batch_size
-
-        orig_PESQ /= self.batch_size
-        denoised_PESQ /= self.batch_size
-
-        orig_STOI /= self.batch_size
-        denoised_STOI /= self.batch_size
-
-        # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
-        if self.trainer.use_dp or self.trainer.use_ddp2:
-            loss_test = loss_test.unsqueeze(0)
-
-        output = OrderedDict({
-            'test_loss': loss_test,
-            'test_orig_SNR': orig_SNR,
-            'test_denoised_SNR': denoised_SNR,
-            'test_orig_PESQ': orig_PESQ,
-            'test_denoised_PESQ': denoised_PESQ,
-            'test_orig_STOI': orig_STOI,
-            'test_denoised_STOI': denoised_STOI
-        })
-
-        return output
-
-    def test_end(self, outputs):
-        """
-        Called at the end of testing to aggregate outputs
-        :param outputs: list of individual outputs of each test step
-        :return:
-        """
-        # if returned a scalar from validation_step, outputs is a list of tensor scalars
-        # we return just the average in this case (if we want)
-        # return torch.stack(outputs).mean()
-
-        test_loss_mean = 0
-        test_orig_SNR_mean = 0
-        test_denoised_SNR_mean = 0
-        test_orig_PESQ_mean = 0
-        test_denoised_PESQ_mean = 0
-        test_orig_STOI_mean = 0
-        test_denoised_STOI_mean = 0
-        for output in outputs:
-            test_loss = output['test_loss']
-            test_orig_SNR = output['test_orig_SNR']
-            test_denoised_SNR = output['test_denoised_SNR']
-            test_orig_PESQ = output['test_orig_PESQ']
-            test_denoised_PESQ = output['test_denoised_PESQ']
-            test_orig_STOI = output['test_orig_STOI']
-            test_denoised_STOI = output['test_denoised_STOI']
-
-            # reduce manually when using dp
-            if self.trainer.use_dp or self.trainer.use_ddp2:
-                test_loss = torch.mean(test_loss)
-            
-            test_loss_mean += test_loss
-            test_orig_SNR_mean += test_orig_SNR
-            test_denoised_SNR_mean += test_denoised_SNR
-            test_orig_PESQ_mean += test_orig_PESQ
-            test_denoised_PESQ_mean += test_denoised_PESQ
-            test_orig_STOI_mean += test_orig_STOI
-            test_denoised_STOI_mean += test_denoised_STOI
-
-        test_loss_mean /= len(outputs)
-        test_orig_SNR_mean /= len(outputs)
-        test_denoised_SNR_mean /= len(outputs)
-        test_orig_PESQ_mean /= len(outputs)
-        test_denoised_PESQ_mean /= len(outputs)
-        test_orig_STOI_mean /= len(outputs)
-        test_denoised_STOI_mean /= len(outputs)
-        
-        tqdm_dict = {'test_loss': test_loss_mean,
-                     'test_orig_SNR': test_orig_SNR_mean,
-                     'test_denoised_SNR': test_denoised_SNR_mean,
-                     'test_orig_PESQ': test_orig_PESQ_mean,
-                     'test_denoised_PESQ': test_denoised_PESQ_mean,
-                     'test_orig_STOI': test_orig_STOI_mean,
-                     'test_denoised_STOI': test_denoised_STOI_mean}
-        result = {'progress_bar': tqdm_dict, 'log': tqdm_dict, 'test_loss': test_loss_mean}
-        return result
-
     # ---------------------
     # TRAINING SETUP
     # ---------------------
@@ -344,20 +204,6 @@ class EHNetModel(pl.LightningModule):
 
         return loader
 
-    def __test_dataloader(self):
-        dataset = WAVDataset(self.test_dir, transform=None)
-
-        batch_size = self.batch_size
-
-        loader = DataLoader(
-            dataset=dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=0
-        )
-
-        return loader
-
     @pl.data_loader
     def train_dataloader(self):
         log.info('Training data loader called.')
@@ -367,8 +213,3 @@ class EHNetModel(pl.LightningModule):
     def val_dataloader(self):
         log.info('Validation data loader called.')
         return self.__dataloader(train=False)
-
-    @pl.data_loader
-    def test_dataloader(self):
-        log.info('Test data loader called.')
-        return self.__test_dataloader()
