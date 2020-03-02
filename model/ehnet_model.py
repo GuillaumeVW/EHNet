@@ -179,7 +179,7 @@ class EHNetModel(pl.LightningModule):
     def __dataloader(self, train):
         # init data generators
 
-        transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2, normal=True)
+        transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2, normalized=True)
 
         if train:
             dataset = WAVDataset(self.train_dir, transform=transform)
