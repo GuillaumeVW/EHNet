@@ -19,7 +19,7 @@ model = EHNetModel(hparams=Namespace(**{'train_dir': train_dir,
                                         'kernel_size_t': 11,
                                         'n_lstm_layers': 2,
                                         'n_lstm_units': 1024,
-                                        'lstm_dropout': 0.3}))
+                                        'lstm_dropout': 0.2}))
 
 logger = TensorBoardLogger(save_dir=os.getcwd(), name="lightning_logs")
 checkpoint_path = os.path.join(logger.save_dir, logger.name, f"version_{logger.version}", "checkpoints")

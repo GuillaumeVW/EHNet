@@ -1,6 +1,8 @@
 import os
-import torchaudio
 from pathlib import Path
+
+import torch
+import torchaudio
 from torch.utils.data import Dataset
 
 torchaudio.set_audio_backend("soundfile")  # default backend (SoX) has bugs when loading WAVs
@@ -32,8 +34,8 @@ class WAVDataset(Dataset):
     def __getitem__(self, idx):
         noisy_path = self.noisy_WAVs[idx]
         clean_path = self.clean_dir.joinpath(noisy_path.name.split('+')[0] + '.wav')  # get the filename of the clean WAV from the filename of the noisy WAV
-        clean_waveform, _ = torchaudio.load(clean_path, normalization=2**15)
-        noisy_waveform, _ = torchaudio.load(noisy_path, normalization=2**15)
+        clean_waveform, _ = torchaudio.load(clean_path, normalization=lambda x: torch.abs(x).max())
+        noisy_waveform, _ = torchaudio.load(noisy_path, normalization=lambda x: torch.abs(x).max())
 
         assert clean_waveform.shape[0] == 1 and noisy_waveform.shape[0] == 1, 'WAV file is not single channel!'
 
