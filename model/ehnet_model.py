@@ -13,7 +13,7 @@ from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torchaudio.transforms import Spectrogram
-from dataloader.wav_dataset import WAVDataset
+from dataloader.wav_dataset import WAVDataset, LogTransform
 
 
 import pytorch_lightning as pl
@@ -179,7 +179,7 @@ class EHNetModel(pl.LightningModule):
     def __dataloader(self, train):
         # init data generators
 
-        transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2, power=1)
+        transform = nn.Sequential(Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2), LogTransform())
 
         if train:
             dataset = WAVDataset(self.train_dir, transform=transform)

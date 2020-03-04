@@ -43,3 +43,11 @@ class WAVDataset(Dataset):
             return self.transform(noisy_waveform.view(-1)), self.transform(clean_waveform.view(-1))
         else:
             return noisy_waveform.view(-1), clean_waveform.view(-1)
+
+
+class LogTransform(torch.nn.Module):
+    def __init__(self, floor=10**-12):
+        self.floor = floor
+
+    def forward(self, specgram):
+        return torch.log(torch.clamp(specgram, min=self.floor))

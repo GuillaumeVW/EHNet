@@ -1,6 +1,6 @@
 .ipynb_checkpoints
 .vscode
-/WAVs/dataset
+WAVs
 lightning_logs
 
 # Byte-compiled / optimized / DLL files
