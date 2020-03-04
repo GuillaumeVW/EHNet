@@ -47,6 +47,7 @@ class WAVDataset(Dataset):
 
 class LogTransform(torch.nn.Module):
     def __init__(self, floor=10**-12):
+        super().__init__()
         self.floor = floor
 
     def forward(self, specgram):
