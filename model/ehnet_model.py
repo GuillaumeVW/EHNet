@@ -99,12 +99,10 @@ class EHNetModel(pl.LightningModule):
         # forward pass
         x, y = batch
 
-        gain_mask = torch.div(y, torch.clamp(x, min=10**-12))
-
         y_hat = self.forward(x)
 
         # calculate loss
-        loss_val = self.loss(gain_mask, y_hat)
+        loss_val = self.loss(y, y_hat * x)
 
         # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
         if self.trainer.use_dp or self.trainer.use_ddp2:
@@ -128,11 +126,9 @@ class EHNetModel(pl.LightningModule):
         """
         x, y = batch
 
-        gain_mask = torch.div(y, torch.clamp(x, min=10**-12))
-
         y_hat = self.forward(x)
 
-        loss_val = self.loss(gain_mask, y_hat)
+        loss_val = self.loss(y, y_hat * x)
 
         # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
         if self.trainer.use_dp or self.trainer.use_ddp2:
