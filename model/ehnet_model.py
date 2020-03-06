@@ -65,6 +65,7 @@ class EHNetModel(pl.LightningModule):
         self.lstm = nn.LSTM(input_size=n_features, hidden_size=self.n_lstm_units, num_layers=self.n_lstm_layers,
                             batch_first=True, dropout=self.lstm_dropout, bidirectional=True)
         self.dense = nn.Linear(in_features=2 * self.n_lstm_units, out_features=self.n_frequency_bins)
+        self.flatten = nn.Flatten(start_dim=2)
 
     # ---------------------
     # TRAINING
@@ -76,11 +77,11 @@ class EHNetModel(pl.LightningModule):
         :return:
         """
         x = torch.unsqueeze(x, 1)  # (batch_size, 1, frequency_bins, time)
-        x = nn.ReLU()(self.conv(x))  # (batch_size, n_kernels, n_features, time)
+        x = F.relu(self.conv(x))  # (batch_size, n_kernels, n_features, time)
         x = x.permute(0, 3, 1, 2)  # (batch_size, time, n_kernels, n_features)
-        x = nn.Flatten(start_dim=2)(x)  # (batch_size, time, n_kernels * n_features)
+        x = self.flatten(x)  # (batch_size, time, n_kernels * n_features)
         x, _ = self.lstm(x)  # (batch_size, time, 2 * n_lstm_units)
-        x = nn.ReLU()(self.dense(x))  # (batch_size, time, frequency_bins)
+        x = F.relu(self.dense(x))  # (batch_size, time, frequency_bins)
         x = x.permute(0, 2, 1)  # (batch_size, frequency_bins, time)
 
         return x
@@ -98,10 +99,12 @@ class EHNetModel(pl.LightningModule):
         # forward pass
         x, y = batch
 
+        gain_mask = torch.div(y, torch.clamp(x, min=10**-12))
+
         y_hat = self.forward(x)
 
         # calculate loss
-        loss_val = self.loss(y, y_hat)
+        loss_val = self.loss(gain_mask, y_hat)
 
         # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
         if self.trainer.use_dp or self.trainer.use_ddp2:
@@ -125,9 +128,11 @@ class EHNetModel(pl.LightningModule):
         """
         x, y = batch
 
+        gain_mask = torch.div(y, torch.clamp(x, min=10**-12))
+
         y_hat = self.forward(x)
 
-        loss_val = self.loss(y, y_hat)
+        loss_val = self.loss(gain_mask, y_hat)
 
         # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
         if self.trainer.use_dp or self.trainer.use_ddp2:
@@ -179,7 +184,7 @@ class EHNetModel(pl.LightningModule):
     def __dataloader(self, train):
         # init data generators
 
-        transform = nn.Sequential(Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2), LogTransform())
+        transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2, power=1)
 
         if train:
             dataset = WAVDataset(self.train_dir, transform=transform)
@@ -199,7 +204,7 @@ class EHNetModel(pl.LightningModule):
             batch_size=batch_size,
             shuffle=should_shuffle,
             sampler=train_sampler,
-            num_workers=0
+            num_workers=4
         )
 
         return loader
