@@ -81,7 +81,7 @@ class EHNetModel(pl.LightningModule):
         x = x.permute(0, 3, 1, 2)  # (batch_size, time, n_kernels, n_features)
         x = self.flatten(x)  # (batch_size, time, n_kernels * n_features)
         x, _ = self.lstm(x)  # (batch_size, time, 2 * n_lstm_units)
-        x = F.relu(self.dense(x))  # (batch_size, time, frequency_bins)
+        x = torch.sigmoid(self.dense(x))  # (batch_size, time, frequency_bins)
         x = x.permute(0, 2, 1)  # (batch_size, frequency_bins, time)
 
         return x
@@ -99,10 +99,14 @@ class EHNetModel(pl.LightningModule):
         # forward pass
         x, y = batch
 
-        y_hat = self.forward(x)
+        x_spectrogram = x.pow(2).sum(-1).sqrt()
+        S = torch.clamp(y.pow(2).sum(-1).sqrt(), min=10**-12)
+        N = torch.clamp((x - y).pow(2).sum(-1).sqrt(), min=10**-12)
+        irm = S / (S + N)
 
-        # calculate loss
-        loss_val = self.loss(y, y_hat * x)
+        y_hat = self.forward(LogTransform()(x_spectrogram))
+
+        loss_val = self.loss(irm, y_hat)
 
         # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
         if self.trainer.use_dp or self.trainer.use_ddp2:
@@ -126,9 +130,14 @@ class EHNetModel(pl.LightningModule):
         """
         x, y = batch
 
-        y_hat = self.forward(x)
+        x_spectrogram = x.pow(2).sum(-1).sqrt()
+        S = torch.clamp(y.pow(2).sum(-1).sqrt(), min=10**-12)
+        N = torch.clamp((x - y).pow(2).sum(-1).sqrt(), min=10**-12)
+        irm = S / (S + N)
 
-        loss_val = self.loss(y, y_hat * x)
+        y_hat = self.forward(LogTransform()(x_spectrogram))
+
+        loss_val = self.loss(irm, y_hat)
 
         # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
         if self.trainer.use_dp or self.trainer.use_ddp2:
@@ -180,7 +189,7 @@ class EHNetModel(pl.LightningModule):
     def __dataloader(self, train):
         # init data generators
 
-        transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2, power=1)
+        transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2, power=None)
 
         if train:
             dataset = WAVDataset(self.train_dir, transform=transform)
