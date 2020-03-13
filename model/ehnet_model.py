@@ -100,8 +100,8 @@ class EHNetModel(pl.LightningModule):
         x, y = batch
 
         x_spectrogram = x.pow(2).sum(-1).sqrt()
-        S = y.pow(2).sum(-1).sqrt()
-        N = (x - y).pow(2).sum(-1).sqrt()
+        S = y.pow(2).sum(-1)
+        N = (x - y).pow(2).sum(-1)
         irm = torch.div(S, S + N)
 
         y_hat = self.forward(LogTransform()(x_spectrogram))
@@ -131,8 +131,8 @@ class EHNetModel(pl.LightningModule):
         x, y = batch
 
         x_spectrogram = x.pow(2).sum(-1).sqrt()
-        S = torch.clamp(y.pow(2).sum(-1).sqrt(), min=10**-12)
-        N = torch.clamp((x - y).pow(2).sum(-1).sqrt(), min=10**-12)
+        S = y.pow(2).sum(-1)
+        N = (x - y).pow(2).sum(-1)
         irm = S / (S + N)
 
         y_hat = self.forward(LogTransform()(x_spectrogram))
