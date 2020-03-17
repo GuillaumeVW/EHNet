@@ -21,7 +21,9 @@ hparams = {'train_dir': train_dir,
 
 model = EHNetModel(hparams=Namespace(**hparams))
 
-logger = NeptuneLogger(api_key="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vdWkubmVwdHVuZS5haSIsImFwaV91cmwiOiJodHRwczovL3VpLm5lcHR1bmUuYWkiLCJhcGlfa2V5IjoiYTc4YTJjN2YtMzY3NC00OWVhLTk4MTItZjBhYzY2NjEyZjg5In0=",
+logger = NeptuneLogger(api_key=("eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vdWkubmVwdHVuZS5haSIsImFwaV91c"
+                                "mwiOiJodHRwczovL3VpLm5lcHR1bmUuYWkiLCJhcGlfa2V5IjoiYTc4YTJjN2"
+                                "YtMzY3NC00OWVhLTk4MTItZjBhYzY2NjEyZjg5In0="),
                        project_name="guillaumevw/ehnet",
                        params=hparams,
                        upload_source_files=['train_nn.py', 'model/ehnet_model.py'])
