@@ -11,7 +11,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
 from torchaudio.transforms import Spectrogram
 from dataloader.wav_dataset import WAVDataset, LogTransform
 
@@ -81,7 +80,7 @@ class EHNetModel(pl.LightningModule):
         x = x.permute(0, 3, 1, 2)  # (batch_size, time, n_kernels, n_features)
         x = self.flatten(x)  # (batch_size, time, n_kernels * n_features)
         x, _ = self.lstm(x)  # (batch_size, time, 2 * n_lstm_units)
-        x = F.relu(self.dense(x))  # (batch_size, time, frequency_bins)
+        x = torch.sigmoid(self.dense(x))  # (batch_size, time, frequency_bins)
         x = x.permute(0, 2, 1)  # (batch_size, frequency_bins, time)
 
         return x
@@ -99,14 +98,14 @@ class EHNetModel(pl.LightningModule):
         # forward pass
         x, y = batch
 
-        y_hat = self.forward(x)
+        x_spectrogram = x.pow(2).sum(-1).sqrt()
+        S = torch.clamp(y.pow(2).sum(-1), min=10**-12)
+        N = torch.clamp((x - y).pow(2).sum(-1), min=10**-12)
+        irm = torch.div(S, S + N)
 
-        # calculate loss
-        loss_val = self.loss(y, y_hat * x)
+        y_hat = self.forward(LogTransform()(x_spectrogram))
 
-        # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
-        if self.trainer.use_dp or self.trainer.use_ddp2:
-            loss_val = loss_val.unsqueeze(0)
+        loss_val = self.loss(irm, y_hat)
 
         tqdm_dict = {'train_loss': loss_val}
         output = OrderedDict({
@@ -115,7 +114,6 @@ class EHNetModel(pl.LightningModule):
             'log': tqdm_dict
         })
 
-        # can also return just a scalar instead of a dict (return loss_val)
         return output
 
     def validation_step(self, batch, batch_idx):
@@ -126,13 +124,14 @@ class EHNetModel(pl.LightningModule):
         """
         x, y = batch
 
-        y_hat = self.forward(x)
+        x_spectrogram = x.pow(2).sum(-1).sqrt()
+        S = torch.clamp(y.pow(2).sum(-1), min=10**-12)
+        N = torch.clamp((x - y).pow(2).sum(-1), min=10**-12)
+        irm = torch.div(S, S + N)
 
-        loss_val = self.loss(y, y_hat * x)
+        y_hat = self.forward(LogTransform()(x_spectrogram))
 
-        # in DP mode (default) make sure if result is scalar, there's another dim in the beginning
-        if self.trainer.use_dp or self.trainer.use_ddp2:
-            loss_val = loss_val.unsqueeze(0)
+        loss_val = self.loss(irm, y_hat)
 
         output = OrderedDict({
             'val_loss': loss_val,
@@ -141,7 +140,7 @@ class EHNetModel(pl.LightningModule):
         # can also return just a scalar instead of a dict (return loss_val)
         return output
 
-    def validation_end(self, outputs):
+    def validation_epoch_end(self, outputs):
         """
         Called at the end of validation to aggregate outputs
         :param outputs: list of individual outputs of each validation step
@@ -154,10 +153,6 @@ class EHNetModel(pl.LightningModule):
         val_loss_mean = 0
         for output in outputs:
             val_loss = output['val_loss']
-
-            # reduce manually when using dp
-            if self.trainer.use_dp or self.trainer.use_ddp2:
-                val_loss = torch.mean(val_loss)
             val_loss_mean += val_loss
 
         val_loss_mean /= len(outputs)
@@ -174,43 +169,32 @@ class EHNetModel(pl.LightningModule):
         :return: list of optimizers
         """
         optimizer = optim.Adadelta(self.parameters(), lr=1.0, weight_decay=0.0005)
-        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=60, gamma=0.1)
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 120], gamma=0.1)
         return [optimizer], [scheduler]
 
     def __dataloader(self, train):
         # init data generators
 
-        transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2, power=1)
+        transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2, power=None)
 
         if train:
             dataset = WAVDataset(self.train_dir, transform=transform)
         else:
             dataset = WAVDataset(self.val_dir, transform=transform)
 
-        # when using multi-node (ddp) we need to add the  datasampler
-        train_sampler = None
-        batch_size = self.batch_size
-
-        if self.use_ddp:
-            train_sampler = DistributedSampler(dataset)
-
-        should_shuffle = train_sampler is None
         loader = DataLoader(
             dataset=dataset,
-            batch_size=batch_size,
-            shuffle=should_shuffle,
-            sampler=train_sampler,
-            num_workers=4
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=4,
         )
 
         return loader
 
-    @pl.data_loader
     def train_dataloader(self):
         log.info('Training data loader called.')
         return self.__dataloader(train=True)
 
-    @pl.data_loader
     def val_dataloader(self):
         log.info('Validation data loader called.')
         return self.__dataloader(train=False)
