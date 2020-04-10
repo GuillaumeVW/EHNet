@@ -2,20 +2,19 @@
 Example template for defining a system
 """
 import logging as log
+from argparse import Namespace
 from collections import OrderedDict
 from pathlib import Path
-from argparse import Namespace
 
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader
 from torchaudio.transforms import Spectrogram
-from dataloader.wav_dataset import WAVDataset, LogTransform
 
-
-import pytorch_lightning as pl
+from dataloader.wav_dataset import WAVDataset
 
 
 class EHNetModel(pl.LightningModule):
@@ -24,7 +23,7 @@ class EHNetModel(pl.LightningModule):
     Input size: (batch_size, frequency_bins, time)
     """
 
-    def __init__(self, hparams=Namespace(**{'train_dir': None, 'val_dir': None, 'batch_size': 4, 'n_frequency_bins': 256, 'n_kernels': 256,
+    def __init__(self, hparams=Namespace(**{'train_dir': Path(), 'val_dir': Path(), 'batch_size': 4, 'n_frequency_bins': 256, 'n_kernels': 256,
                                             'kernel_size_f': 32, 'kernel_size_t': 11, 'n_lstm_layers': 2, 'n_lstm_units': 1024, 'lstm_dropout': 0})):
         """
         Pass in parsed HyperOptArgumentParser to the model
@@ -41,7 +40,7 @@ class EHNetModel(pl.LightningModule):
         self.n_kernels = self.hparams.n_kernels
         self.kernel_size = (self.hparams.kernel_size_f, self.hparams.kernel_size_t)
         self.stride = (self.kernel_size[0] // 2, 1)
-        self.padding = (self.kernel_size[1] // 2, self.kernel_size[1] // 2)
+        self.padding = (0, self.kernel_size[1] // 2)
         self.n_lstm_layers = self.hparams.n_lstm_layers
         self.n_lstm_units = self.hparams.n_lstm_units
         self.lstm_dropout = self.hparams.lstm_dropout
@@ -75,12 +74,13 @@ class EHNetModel(pl.LightningModule):
         :param x:
         :return:
         """
+        x.requires_grad = True
         x = torch.unsqueeze(x, 1)  # (batch_size, 1, frequency_bins, time)
         x = F.relu(self.conv(x))  # (batch_size, n_kernels, n_features, time)
         x = x.permute(0, 3, 1, 2)  # (batch_size, time, n_kernels, n_features)
         x = self.flatten(x)  # (batch_size, time, n_kernels * n_features)
         x, _ = self.lstm(x)  # (batch_size, time, 2 * n_lstm_units)
-        x = torch.sigmoid(self.dense(x))  # (batch_size, time, frequency_bins)
+        x = F.relu(self.dense(x))  # (batch_size, time, frequency_bins)
         x = x.permute(0, 2, 1)  # (batch_size, frequency_bins, time)
 
         return x
@@ -98,14 +98,12 @@ class EHNetModel(pl.LightningModule):
         # forward pass
         x, y = batch
 
-        x_spectrogram = x.pow(2).sum(-1).sqrt()
-        S = torch.clamp(y.pow(2).sum(-1), min=10**-12)
-        N = torch.clamp((x - y).pow(2).sum(-1), min=10**-12)
-        irm = torch.div(S, S + N)
+        x_ms = x.pow(2).sum(-1).sqrt()
+        y_ms = y.pow(2).sum(-1).sqrt()
 
-        y_hat = self.forward(LogTransform()(x_spectrogram))
+        y_hat = self.forward(x_ms)
 
-        loss_val = self.loss(irm, y_hat)
+        loss_val = self.loss(y_ms, y_hat)
 
         tqdm_dict = {'train_loss': loss_val}
         output = OrderedDict({
@@ -124,14 +122,12 @@ class EHNetModel(pl.LightningModule):
         """
         x, y = batch
 
-        x_spectrogram = x.pow(2).sum(-1).sqrt()
-        S = torch.clamp(y.pow(2).sum(-1), min=10**-12)
-        N = torch.clamp((x - y).pow(2).sum(-1), min=10**-12)
-        irm = torch.div(S, S + N)
+        x_ms = x.pow(2).sum(-1).sqrt()
+        y_ms = y.pow(2).sum(-1).sqrt()
 
-        y_hat = self.forward(LogTransform()(x_spectrogram))
+        y_hat = self.forward(x_ms)
 
-        loss_val = self.loss(irm, y_hat)
+        loss_val = self.loss(y_ms, y_hat)
 
         output = OrderedDict({
             'val_loss': loss_val,
@@ -186,7 +182,7 @@ class EHNetModel(pl.LightningModule):
             dataset=dataset,
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=4,
+            num_workers=0,
         )
 
         return loader
