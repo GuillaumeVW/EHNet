@@ -13,7 +13,7 @@ model = EHNetModel.load_from_checkpoint(Path('/home/guillaume/Downloads/epoch=30
 
 testing_dir = Path('./WAVs/MS-SNSD-test/testing_seen_noise')
 dataset = WAVDataset(dir=testing_dir)
-dataloader = DataLoader(dataset, batch_size=4, drop_last=False, shuffle=True)
+dataloader = DataLoader(dataset, batch_size=16, drop_last=False, shuffle=True)
 noisy_batch, clean_batch = next(iter(dataloader))
 
 #  enable eval mode
@@ -37,15 +37,10 @@ y_ms = y_stft.pow(2).sum(-1).sqrt()
 
 y_ms_hat = model(x_ms)
 
-print(model.loss(y_ms, y_ms_hat).item())
-
 y_stft_hat = torch.stack([y_ms_hat * torch.cos(angle(x_stft)),
                           y_ms_hat * torch.sin(angle(x_stft))], dim=-1)
 
 window = torch.hann_window(n_fft)
 y_waveform_hat = istft(y_stft_hat, n_fft=n_fft, hop_length=n_fft // 2, win_length=n_fft, window=window, length=x_waveform.shape[-1])
 for i, waveform in enumerate(y_waveform_hat.numpy()):
-    sf.write('output/denoised' + str(i) + '.wav', waveform, 16000)
-
-for i, waveform in enumerate(noisy_batch.numpy()):
-    sf.write('output/noisy' + str(i) + '.wav', waveform, 16000)
+    sf.write('denoised' + str(i) + '.wav', waveform, 16000)

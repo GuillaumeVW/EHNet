@@ -1,6 +1,3 @@
-"""
-Example template for defining a system
-"""
 import logging as log
 from argparse import Namespace
 from collections import OrderedDict
@@ -18,18 +15,8 @@ from dataloader.wav_dataset import WAVDataset
 
 
 class EHNetModel(pl.LightningModule):
-    """
-    Sample model to show how to define a template
-    Input size: (batch_size, frequency_bins, time)
-    """
-
     def __init__(self, hparams=Namespace(**{'train_dir': Path(), 'val_dir': Path(), 'batch_size': 4, 'n_frequency_bins': 256, 'n_kernels': 256,
                                             'kernel_size_f': 32, 'kernel_size_t': 11, 'n_lstm_layers': 2, 'n_lstm_units': 1024, 'lstm_dropout': 0})):
-        """
-        Pass in parsed HyperOptArgumentParser to the model
-        :param hparams:
-        """
-        # init superclass
         super(EHNetModel, self).__init__()
 
         self.hparams = hparams
@@ -52,10 +39,6 @@ class EHNetModel(pl.LightningModule):
     # MODEL SETUP
     # ---------------------
     def __build_model(self):
-        """
-        Layout model
-        :return:
-        """
         self.conv = nn.Conv2d(in_channels=1, out_channels=self.n_kernels,
                               kernel_size=self.kernel_size, stride=self.stride,
                               padding=self.padding)
@@ -69,11 +52,6 @@ class EHNetModel(pl.LightningModule):
     # TRAINING
     # ---------------------
     def forward(self, x):
-        """
-        No special modification required for lightning, define as you normally would
-        :param x:
-        :return:
-        """
         x.requires_grad = True
         x = torch.unsqueeze(x, 1)  # (batch_size, 1, frequency_bins, time)
         x = F.relu(self.conv(x))  # (batch_size, n_kernels, n_features, time)
@@ -90,11 +68,6 @@ class EHNetModel(pl.LightningModule):
         return loss
 
     def training_step(self, batch, batch_idx):
-        """
-        Lightning calls this inside the training loop
-        :param batch:
-        :return:
-        """
         # forward pass
         x, y = batch
 
@@ -115,11 +88,6 @@ class EHNetModel(pl.LightningModule):
         return output
 
     def validation_step(self, batch, batch_idx):
-        """
-        Lightning calls this inside the validation loop
-        :param batch:
-        :return:
-        """
         x, y = batch
 
         x_ms = x.pow(2).sum(-1).sqrt()
@@ -137,15 +105,6 @@ class EHNetModel(pl.LightningModule):
         return output
 
     def validation_epoch_end(self, outputs):
-        """
-        Called at the end of validation to aggregate outputs
-        :param outputs: list of individual outputs of each validation step
-        :return:
-        """
-        # if returned a scalar from validation_step, outputs is a list of tensor scalars
-        # we return just the average in this case (if we want)
-        # return torch.stack(outputs).mean()
-
         val_loss_mean = 0
         for output in outputs:
             val_loss = output['val_loss']
@@ -160,17 +119,12 @@ class EHNetModel(pl.LightningModule):
     # TRAINING SETUP
     # ---------------------
     def configure_optimizers(self):
-        """
-        return whatever optimizers we want here
-        :return: list of optimizers
-        """
         optimizer = optim.Adadelta(self.parameters(), lr=1.0, weight_decay=0.0005)
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 120], gamma=0.1)
         return [optimizer], [scheduler]
 
     def __dataloader(self, train):
         # init data generators
-
         transform = Spectrogram(n_fft=(self.n_frequency_bins - 1) * 2, power=None)
 
         if train:
